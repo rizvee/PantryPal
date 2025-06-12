@@ -9,7 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.PhotoCamera // Changed icon
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
@@ -27,16 +27,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.pantrypal.model.PantryItem
-import com.example.pantrypal.view.composables.PantryItemCard // Will be created in the next step
+import com.example.pantrypal.view.composables.PantryItemCard
 import com.example.pantrypal.viewmodel.PantryViewModel
-// import com.example.pantrypal.viewmodel.PantryScreenState // Not directly used if collecting state like this
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PantryScreen(
     viewModel: PantryViewModel = hiltViewModel(),
-    // onNavigateToRecipe: () -> Unit, // Keep if top-level navigation is needed from here
-    onAddItemClick: () -> Unit // Example: For navigating to an "Add Item" screen
+    onAddItemClick: () -> Unit // This will navigate to CameraScanScreen
 ) {
     val pantryScreenState by viewModel.pantryScreenState.collectAsState()
     val items = pantryScreenState.items
@@ -53,19 +51,8 @@ fun PantryScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = {
-                // For now, let's use the ViewModel's addItem as a placeholder
-                // In a real app, this would navigate to a new screen/dialog to input item details
-                viewModel.addItem(
-                    name = "Sample Item ${items.size + 1}",
-                    quantity = "1 pc",
-                    purchaseDate = System.currentTimeMillis(),
-                    // Expire in 7 days for sample
-                    expiryDate = System.currentTimeMillis() + (7 * 24 * 60 * 60 * 1000)
-                )
-                // onAddItemClick() // Use this if you have a dedicated add item screen/flow
-            }) {
-                Icon(Icons.Filled.Add, "Add new pantry item")
+            FloatingActionButton(onClick = onAddItemClick) { // Use the passed lambda
+                Icon(Icons.Filled.PhotoCamera, "Scan new item") // Changed Icon
             }
         }
     ) { innerPadding ->
@@ -82,7 +69,7 @@ fun PantryScreen(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("Your pantry is empty. Tap the '+' button to add items!")
+                    Text("Your pantry is empty. Tap the camera button to scan items!") // Updated text
                 }
             } else {
                 LazyColumn(
@@ -98,14 +85,3 @@ fun PantryScreen(
         }
     }
 }
-
-// Preview for PantryScreen (Optional, but helpful)
-// @Preview(showBackground = true)
-// @Composable
-// fun PantryScreenPreview() {
-//     // You'd need a way to provide a mock PantryViewModel or PantryScreenState for previews
-//     // For simplicity, this is omitted for now but is important for complex screens.
-//     PantryPalTheme { // Assuming PantryPalTheme is defined
-//          PantryScreen(onAddItemClick = {})
-//     }
-// }

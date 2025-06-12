@@ -15,7 +15,8 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import com.example.pantrypal.view.screen.PantryScreen // Import the new PantryScreen
+import com.example.pantrypal.view.screen.CameraScanScreen // Import CameraScanScreen
+import com.example.pantrypal.view.screen.PantryScreen
 import com.example.pantrypal.view.ui.theme.PantryPalTheme
 import dagger.hilt.android.AndroidEntryPoint
 
@@ -41,29 +42,26 @@ fun AppNavigation() {
     val navController = rememberNavController()
     NavHost(navController = navController, startDestination = Screen.PantryScreen.route) {
         composable(Screen.PantryScreen.route) {
-            // Use the new PantryScreen from view.screen package
             PantryScreen(
-                // viewModel is provided by hiltViewModel() within PantryScreen itself
-                onAddItemClick = { /* TODO: Navigate to Add Item Screen */ }
-                // onNavigateToRecipe = { navController.navigate(Screen.RecipeScreen.route) } // Example navigation
+                onAddItemClick = { navController.navigate(Screen.CameraScanScreen.route) } // Navigate to CameraScanScreen
             )
         }
         composable(Screen.RecipeScreen.route) {
-            // Basic placeholder - Replace with actual Recipe Screen UI
             RecipeScreenPlaceholder(onNavigateToPantry = { navController.navigate(Screen.PantryScreen.route) })
         }
-        // Add other destinations here:
-        // composable(Screen.AddItemScreen.route) { /* ... */ }
+        composable(Screen.CameraScanScreen.route) { // Add route for CameraScanScreen
+            CameraScanScreen(
+                onNavigateBack = { navController.popBackStack() } // Navigate back
+            )
+        }
     }
 }
 
-// Define a sealed class for screen routes for better organization
 sealed class Screen(val route: String) {
     object PantryScreen : Screen("pantryScreen")
     object RecipeScreen : Screen("recipeScreen")
-    // object AddItemScreen : Screen("addItemScreen") // Example for future screen
+    object CameraScanScreen : Screen("cameraScanScreen") // Add CameraScanScreen
 }
-
 
 @Composable
 fun RecipeScreenPlaceholder(onNavigateToPantry: () -> Unit, modifier: Modifier = Modifier) {
@@ -72,7 +70,6 @@ fun RecipeScreenPlaceholder(onNavigateToPantry: () -> Unit, modifier: Modifier =
             text = "Recipe Screen (Placeholder)",
             style = MaterialTheme.typography.headlineMedium
         )
-        // Button(onClick = onNavigateToPantry) { Text("Back to Pantry") } // Example
     }
 }
 
