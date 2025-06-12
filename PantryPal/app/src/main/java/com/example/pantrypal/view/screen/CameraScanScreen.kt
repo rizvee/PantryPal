@@ -1,9 +1,10 @@
 package com.example.pantrypal.view.screen
 
 import android.Manifest
-import android.content.Context
 import android.content.pm.PackageManager
+import android.graphics.RectF // Import for RectF
 import android.util.Log
+import android.util.Size
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
@@ -11,6 +12,7 @@ import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.compose.foundation.gestures.detectTapGestures // Import for tap detection
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,6 +24,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -29,159 +32,164 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput // Import for pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity // Import LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import com.example.pantrypal.analyzer.GroceryImageAnalyzer // Will be created later
-import java.util.concurrent.Executors
+import com.example.pantrypal.analyzer.DetectionResult
+import com.example.pantrypal.analyzer.GroceryImageAnalyzer
+import com.example.pantrypal.view.composables.BoundingBoxOverlay
+// Import for AddItemAlertDialog will be needed in a later step
+// import com.example.pantrypal.view.composables.AddItemAlertDialog
+import kotlin.math.min
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CameraScanScreen(
-    // viewModel: CameraViewModel = hiltViewModel() // If a ViewModel is used
     onNavigateBack: () -> Unit
+    // pantryViewModel: PantryViewModel = hiltViewModel() // Will be needed for adding item
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val density = LocalDensity.current // Get density for px to dp conversion if needed, or for scaling logic
+
     var hasCameraPermission by remember {
-        mutableStateOf(
-            ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.CAMERA
-            ) == PackageManager.PERMISSION_GRANTED
-        )
+        mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
     }
     val cameraPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
-        onResult = { granted ->
-            hasCameraPermission = granted
-        }
+        onResult = { granted -> hasCameraPermission = granted }
     )
 
-    // Used to build and bind camera use cases
-    val cameraProviderFuture = remember { ProcessCameraProvider.getInstance(context) }
-    val previewView = remember { PreviewView(context) }
     val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
 
-    // Request permission if not already granted
+    var detectionResults by remember { mutableStateOf<List<DetectionResult>>(emptyList()) }
+    var analyzedImageSize by remember { mutableStateOf(Size(0, 0)) }
+
+    // State to hold the detection result that the user tapped on
+    var selectedDetectionForDialog by remember { mutableStateOf<DetectionResult?>(null) }
+
     LaunchedEffect(Unit) {
         if (!hasCameraPermission) {
             cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
         }
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(title = { Text("Scan Groceries") })
+    DisposableEffect(Unit) {
+        onDispose {
+            cameraExecutor.shutdown()
+            Log.d("CameraScanScreen", "CameraExecutor shut down")
         }
+    }
+
+    Scaffold(
+        topBar = { TopAppBar(title = { Text("Scan Groceries") }) }
     ) { paddingValues ->
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues),
+            modifier = Modifier.fillMaxSize().padding(paddingValues),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
             if (hasCameraPermission) {
-                Text("Camera Permission Granted. Setting up camera...")
-                AndroidView(
-                    factory = { previewView },
-                    modifier = Modifier.fillMaxSize().weight(1f),
-                    update = {
-                        // This block is called when the view is updated,
-                        // which is a good place to bind the camera use cases.
-                        val cameraProvider = cameraProviderFuture.get()
-                        val preview = Preview.Builder().build().also {
-                            it.setSurfaceProvider(previewView.surfaceProvider)
-                        }
+                var canvasSize by remember { mutableStateOf(Size(0,0)) } // To store canvas size for tap calculation
 
-                        val imageAnalyzer = ImageAnalysis.Builder()
-                            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                            .build()
-                            .also {
-                                it.setAnalyzer(cameraExecutor, GroceryImageAnalyzer { item ->
-                                    // This lambda will be called by the analyzer with the detected item
-                                    Log.d("CameraScanScreen", "Detected item: $item")
-                                    // Here you would typically update ViewModel or UI state
-                                })
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .weight(1f)
+                        .pointerInput(detectionResults, analyzedImageSize, canvasSize) { // Depend on these states
+                            detectTapGestures { offset ->
+                                if (analyzedImageSize.width == 0 || analyzedImageSize.height == 0 || canvasSize.width == 0 || canvasSize.height == 0) return@detectTapGestures
+
+                                val scaleX = canvasSize.width.toFloat() / analyzedImageSize.width
+                                val scaleY = canvasSize.height.toFloat() / analyzedImageSize.height
+                                val scale = min(scaleX, scaleY)
+
+                                val offsetX = (canvasSize.width - analyzedImageSize.width * scale) / 2f
+                                val offsetY = (canvasSize.height - analyzedImageSize.height * scale) / 2f
+
+                                for (detection in detectionResults.reversed()) { // Iterate reversed so top-most box is preferred
+                                    val scaledBox = RectF(
+                                        detection.boundingBox.left * scale + offsetX,
+                                        detection.boundingBox.top * scale + offsetY,
+                                        detection.boundingBox.right * scale + offsetX,
+                                        detection.boundingBox.bottom * scale + offsetY
+                                    )
+                                    if (scaledBox.contains(offset.x, offset.y)) {
+                                        selectedDetectionForDialog = detection
+                                        Log.d("CameraScanScreen", "Tapped on: ${detection.label}")
+                                        break // Found a tapped box
+                                    }
+                                }
                             }
-
-                        val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-
-                        try {
-                            cameraProvider.unbindAll() // Unbind use cases before rebinding
-                            cameraProvider.bindToLifecycle(
-                                lifecycleOwner,
-                                cameraSelector,
-                                preview,
-                                imageAnalyzer // Add imageAnalyzer here
-                            )
-                        } catch (exc: Exception) {
-                            Log.e("CameraScanScreen", "Use case binding failed", exc)
-                            // Handle exceptions, e.g., show an error message
                         }
-                    }
-                )
-                // Add any overlay UI here if needed (e.g., a button to trigger scan)
-                Button(onClick = { /* TODO: Manual scan trigger if needed */ }) {
-                    Text("Scan")
-                }
+                ) {
+                    AndroidView(
+                        factory = { PreviewView(context) },
+                        modifier = Modifier.fillMaxSize(),
+                        update = { previewView ->
+                            val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
+                            cameraProviderFuture.addListener({
+                                val cameraProvider = cameraProviderFuture.get()
+                                val previewUseCase = Preview.Builder().build().also {
+                                    it.setSurfaceProvider(previewView.surfaceProvider)
+                                }
+                                val imageAnalysisUseCase = ImageAnalysis.Builder()
+                                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                                    .build()
+                                    .also { analysisUseCase ->
+                                        analysisUseCase.setAnalyzer(cameraExecutor, GroceryImageAnalyzer(
+                                            context = context,
+                                            onResults = { results, width, height ->
+                                                detectionResults = results
+                                                analyzedImageSize = Size(width, height)
+                                            }
+                                        ))
+                                    }
+                                val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+                                try {
+                                    cameraProvider.unbindAll()
+                                    cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, previewUseCase, imageAnalysisUseCase)
+                                } catch (exc: Exception) {
+                                    Log.e("CameraScanScreen", "Use case binding failed", exc)
+                                }
+                            }, ContextCompat.getMainExecutor(context))
+                        }
+                    )
 
+                    if (analyzedImageSize.width > 0 && analyzedImageSize.height > 0) {
+                        BoundingBoxOverlay(
+                            results = detectionResults,
+                            imageWidth = analyzedImageSize.width,
+                            imageHeight = analyzedImageSize.height,
+                            modifier = Modifier.fillMaxSize()
+                                .onSizeChanged {
+                                   canvasSize = Size(it.width, it.height)
+                                }
+                        )
+                    }
+                }
             } else {
                 Text("Camera permission is required to scan items.")
                 Button(onClick = { cameraPermissionLauncher.launch(Manifest.permission.CAMERA) }) {
                     Text("Request Camera Permission")
                 }
             }
+
+            if (selectedDetectionForDialog != null) {
+                Text("Selected: ${selectedDetectionForDialog?.label} - (Dialog will show here)") // Placeholder
+                 Button(onClick = { selectedDetectionForDialog = null }) { // Temp way to clear selection
+                    Text("Clear Selection (temp)")
+                }
+            }
+
             Button(onClick = onNavigateBack, modifier = Modifier.padding(16.dp)) {
                 Text("Back to Pantry")
             }
         }
     }
-    // Ensure to release the executor when the composable is disposed
-    // DisposedEffect or similar might be needed if not using viewModelScope for executor
-    // However, since it's a single thread executor for analysis, it might be managed by CameraX lifecycle.
-    // For now, we'll rely on CameraX to manage its resources with bindToLifecycle.
-}
-
-// Helper function to start camera (might be part of CameraViewModel or a utility class)
-private fun startCamera(
-    context: Context,
-    lifecycleOwner: androidx.lifecycle.LifecycleOwner,
-    previewView: PreviewView,
-    onItemDetected: (String) -> Unit // Callback for detected items
-) {
-    val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
-    cameraProviderFuture.addListener({
-        val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
-
-        val preview = Preview.Builder().build().also {
-            it.setSurfaceProvider(previewView.surfaceProvider)
-        }
-
-        val imageAnalyzer = ImageAnalysis.Builder()
-            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-            .build()
-            .also {
-                it.setAnalyzer(Executors.newSingleThreadExecutor(), GroceryImageAnalyzer { item ->
-                    onItemDetected(item) // Pass the detected item to the callback
-                })
-            }
-
-        val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-
-        try {
-            cameraProvider.unbindAll()
-            cameraProvider.bindToLifecycle(
-                lifecycleOwner,
-                cameraSelector,
-                preview,
-                imageAnalyzer // Bind the analyzer
-            )
-        } catch (exc: Exception) {
-            Log.e("CameraScanScreen", "Use case binding failed", exc)
-        }
-    }, ContextCompat.getMainExecutor(context))
 }
